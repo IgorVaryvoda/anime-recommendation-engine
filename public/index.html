@@ -721,15 +721,28 @@
 
                     if (needTitles.length === 0) return;
 
-                    this.progress.currentAnime = 'Fetching anime titles...';
+                    this.progress.currentAnime = `Fetching ${needTitles.length} anime titles...`;
+                    this.progress.current = 0;
+                    this.progress.total = needTitles.length;
                     this.loading = true;
 
-                    for (let anime of needTitles) {
+                    for (let i = 0; i < needTitles.length; i++) {
+                        const anime = needTitles[i];
+                        this.progress.current = i + 1;
+                        this.progress.currentAnime = `Fetching titles... ${i + 1}/${needTitles.length}`;
+
                         try {
                             const details = await this.fetchAnimeDetails(anime.id);
                             if (details.title) {
-                                anime.title = details.title;
-                                delete anime.needsTitle;
+                                // Update in place to maintain reactivity
+                                const index = this.animeList.findIndex(a => a.id === anime.id);
+                                if (index !== -1) {
+                                    this.animeList[index] = {
+                                        ...this.animeList[index],
+                                        title: details.title,
+                                        needsTitle: false
+                                    };
+                                }
                             }
                             await this.sleep(350); // Rate limiting
                         } catch (err) {
@@ -737,9 +750,11 @@
                         }
                     }
 
-                    // Update topAnime references
-                    this.topAnime = this.animeList.filter(a => a.score >= 8);
+                    // Force reactivity update
+                    this.topAnime = [...this.animeList.filter(a => a.score >= 8)];
                     this.loading = false;
+                    this.progress.current = 0;
+                    this.progress.total = 0;
                 },
 
                 async saveListToAPI() {
