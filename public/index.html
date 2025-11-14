@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.jikan.moe; img-src 'self' https: data:;">
     <title>Anime Recommendations</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
@@ -661,8 +662,26 @@
                 },
 
                 async parseXML(xmlText) {
+                    // Security: Validate XML before parsing to prevent XXE attacks
+                    if (xmlText.includes('<!DOCTYPE') || xmlText.includes('<!ENTITY')) {
+                        this.error = 'Invalid XML: DOCTYPE/ENTITY declarations not allowed';
+                        return;
+                    }
+
+                    if (xmlText.match(/SYSTEM|PUBLIC/i)) {
+                        this.error = 'Suspicious XML content detected';
+                        return;
+                    }
+
                     const parser = new DOMParser();
                     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+                    // Check for parse errors
+                    const parseError = xmlDoc.querySelector('parsererror');
+                    if (parseError) {
+                        this.error = 'Failed to parse XML file';
+                        return;
+                    }
 
                     const animeElements = xmlDoc.getElementsByTagName('anime');
                     const ratedAnime = [];
