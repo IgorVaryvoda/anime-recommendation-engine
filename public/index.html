@@ -668,26 +668,23 @@
 
                     for (let anime of animeElements) {
                         const id = anime.querySelector('series_animedb_id')?.textContent;
-                        let title = anime.querySelector('series_title')?.textContent;
+                        const titleElement = anime.querySelector('series_title');
+                        let title = titleElement?.textContent || null;
                         const score = anime.querySelector('my_score')?.textContent;
                         const status = anime.querySelector('my_status')?.textContent;
-
-                        // For Kitsu exports: title might be missing, use ID as placeholder
-                        if (!title && id) {
-                            title = `Anime ${id}`;
-                        }
 
                         if (id) {
                             allIds.add(id);
                         }
 
-                        if (score && parseInt(score) > 0 && title) {
+                        // Only include rated anime
+                        if (score && parseInt(score) > 0 && id) {
                             ratedAnime.push({
                                 id,
-                                title,
+                                title: title || `Loading...`, // Placeholder
                                 score: parseInt(score),
                                 status,
-                                needsTitle: !anime.querySelector('series_title')?.textContent
+                                needsTitle: !title  // Mark if title needs fetching
                             });
                         }
                     }
@@ -709,6 +706,8 @@
                         topRated: this.topAnime.length
                     };
 
+                    console.log('Parsed anime:', ratedAnime.length, 'Need titles:', ratedAnime.filter(a => a.needsTitle).length);
+
                     // Fetch missing titles for Kitsu exports
                     await this.fetchMissingTitles();
 
@@ -719,8 +718,12 @@
                 async fetchMissingTitles() {
                     const needTitles = this.animeList.filter(a => a.needsTitle);
 
-                    if (needTitles.length === 0) return;
+                    if (needTitles.length === 0) {
+                        console.log('No titles need fetching');
+                        return;
+                    }
 
+                    console.log(`Fetching ${needTitles.length} titles from Jikan API`);
                     this.progress.currentAnime = `Fetching ${needTitles.length} anime titles...`;
                     this.progress.current = 0;
                     this.progress.total = needTitles.length;
@@ -733,15 +736,15 @@
 
                         try {
                             const details = await this.fetchAnimeDetails(anime.id);
+                            console.log(`Fetched title for ${anime.id}:`, details.title);
+
                             if (details.title) {
-                                // Update in place to maintain reactivity
+                                // Find the anime in the array and update it
                                 const index = this.animeList.findIndex(a => a.id === anime.id);
                                 if (index !== -1) {
-                                    this.animeList[index] = {
-                                        ...this.animeList[index],
-                                        title: details.title,
-                                        needsTitle: false
-                                    };
+                                    // Direct property update (Vue 3 Proxy handles reactivity)
+                                    this.animeList[index].title = details.title;
+                                    this.animeList[index].needsTitle = false;
                                 }
                             }
                             await this.sleep(350); // Rate limiting
@@ -750,11 +753,12 @@
                         }
                     }
 
-                    // Force reactivity update
-                    this.topAnime = [...this.animeList.filter(a => a.score >= 8)];
+                    // Refresh topAnime with updated titles
+                    this.topAnime = this.animeList.filter(a => a.score >= 8);
                     this.loading = false;
                     this.progress.current = 0;
                     this.progress.total = 0;
+                    console.log('Finished fetching titles');
                 },
 
                 async saveListToAPI() {
