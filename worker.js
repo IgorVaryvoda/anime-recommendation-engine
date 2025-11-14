@@ -30,8 +30,9 @@ export default {
       return handleGetList(request, env, id, corsHeaders);
     }
 
-    // Serve index.html for all other routes (SPA)
-    return env.ASSETS.fetch(request);
+    // For all other routes (including dynamic routes like /:id), serve index.html
+    // This enables SPA routing for shareable URLs
+    return fetch(new URL('/index.html', request.url));
   }
 };
 
