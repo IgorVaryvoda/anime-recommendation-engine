@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // CORS headers
@@ -30,9 +30,27 @@ export default {
       return handleGetList(request, env, id, corsHeaders);
     }
 
-    // For all other routes (including dynamic routes like /:id), serve index.html
-    // This enables SPA routing for shareable URLs
-    return fetch(new URL('/index.html', request.url));
+    // For SPA routing: serve index.html for all non-API routes
+    // Directly fetch from KV using the hashed key
+    try {
+      const html = await env.__STATIC_CONTENT.get('index.ffb4c5c2b0.html');
+
+      if (!html) {
+        return new Response('HTML not found in KV', { status: 404 });
+      }
+
+      return new Response(html, {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600',
+        },
+      });
+    } catch (e) {
+      return new Response(`Error: ${e.message}`, {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' }
+      });
+    }
   }
 };
 
