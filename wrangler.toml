@@ -1,0 +1,13 @@
+name = "anime-recommendations"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "anime-recommendations-db"
+database_id = "your-database-id-here"  # Will be created when you run `wrangler d1 create`
+
+# Assets binding
+[assets]
+directory = "public"
