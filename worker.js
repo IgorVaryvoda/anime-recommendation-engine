@@ -436,34 +436,13 @@ async function handleGenerateRecommendations(request, env, listId, corsHeaders) 
 }
 
 async function handleStaticFile(request, env, ctx) {
-  try {
-    // Use getAssetFromKV to handle static files properly
-    // This works for both local development and production
-    return await getAssetFromKV(
-      {
-        request,
-        waitUntil: ctx.waitUntil.bind(ctx),
-      },
-      {
-        ASSET_NAMESPACE: env.__STATIC_CONTENT,
-        ASSET_MANIFEST: typeof __STATIC_CONTENT_MANIFEST !== 'undefined'
-          ? JSON.parse(__STATIC_CONTENT_MANIFEST)
-          : {},
-        cacheControl: {
-          browserTTL: CONFIG.CACHE.MAX_AGE,
-          edgeTTL: CONFIG.CACHE.MAX_AGE,
-        },
-      }
-    );
-  } catch (e) {
-    // If asset not found, try to serve index.html for SPA routing
+  const url = new URL(request.url);
+
+  // Try to serve specific assets first using getAssetFromKV with manifest
+  if (url.pathname.includes('.')) {
     try {
-      const notFoundRequest = new Request(`${new URL(request.url).origin}/index.html`, request);
       return await getAssetFromKV(
-        {
-          request: notFoundRequest,
-          waitUntil: ctx.waitUntil.bind(ctx),
-        },
+        { request, waitUntil: ctx.waitUntil.bind(ctx) },
         {
           ASSET_NAMESPACE: env.__STATIC_CONTENT,
           ASSET_MANIFEST: typeof __STATIC_CONTENT_MANIFEST !== 'undefined'
@@ -472,12 +451,60 @@ async function handleStaticFile(request, env, ctx) {
         }
       );
     } catch (e) {
-      console.error('Static file error:', e);
-      return new Response('Error loading page', {
-        status: 500,
-        headers: { 'Content-Type': 'text/plain' }
-      });
+      // If manifest lookup fails, try direct lookup with hashed name
+      try {
+        const baseName = url.pathname.split('/').pop().split('.')[0];
+        const ext = url.pathname.split('.').pop();
+        const keys = await env.__STATIC_CONTENT.list({ prefix: `${baseName}.` });
+
+        if (keys.keys && keys.keys.length > 0) {
+          const hashedKey = keys.keys.find(k => k.name.endsWith(`.${ext}`));
+          if (hashedKey) {
+            const content = await env.__STATIC_CONTENT.get(hashedKey.name);
+            if (content) {
+              const contentType = ext === 'css' ? 'text/css' :
+                                  ext === 'js' ? 'application/javascript' :
+                                  'application/octet-stream';
+              return new Response(content, {
+                headers: {
+                  'Content-Type': contentType,
+                  'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
+                },
+              });
+            }
+          }
+        }
+      } catch (e2) {
+        console.error('Asset lookup error:', e2);
+      }
+      return new Response('Asset not found', { status: 404 });
     }
+  }
+
+  // For all other routes (SPA), serve index.html by auto-detecting the hashed filename
+  try {
+    const keys = await env.__STATIC_CONTENT.list({ prefix: 'index.' });
+
+    if (!keys.keys || keys.keys.length === 0) {
+      return new Response('No HTML files found', { status: 404 });
+    }
+
+    const indexKey = keys.keys[0].name;
+    const html = await env.__STATIC_CONTENT.get(indexKey);
+
+    if (!html) {
+      return new Response('HTML not found', { status: 404 });
+    }
+
+    return new Response(html, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
+      },
+    });
+  } catch (e) {
+    console.error('Static file error:', e);
+    return new Response('Error loading page', { status: 500 });
   }
 }
 
