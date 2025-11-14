@@ -9,3 +9,4 @@ dist/
 sample_data/animelist_1763138625_-_7390352.xml.gz
 .gitignore
 sample_data/kitsu--anime.xml
+SECURITY_AUDIT.md

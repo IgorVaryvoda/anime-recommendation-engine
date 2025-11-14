@@ -62,6 +62,7 @@ export default {
     // CORS headers - restrict to own domain in production
     const origin = request.headers.get('Origin');
     const allowedOrigins = [
+      'https://anime.varyvoda.com',
       'https://anime-recommendations.cheguevaraua.workers.dev',
       'http://localhost:8787',
       'http://localhost:8000'
