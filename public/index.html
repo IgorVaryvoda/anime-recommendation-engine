@@ -492,9 +492,9 @@
     <div id="app">
         <div class="container">
             <h1>🎌 Anime Recommendations</h1>
-            <p class="subtitle">Upload your MyAnimeList export to get personalized recommendations</p>
+            <p class="subtitle">{{ viewOnly ? 'Viewing shared anime recommendations' : 'Upload your MyAnimeList export to get personalized recommendations' }}</p>
 
-            <div class="upload-area"
+            <div v-if="!viewOnly" class="upload-area"
                  :class="{ 'drag-over': isDragging }"
                  @click="$refs.fileInput.click()"
                  @dragover.prevent="isDragging = true"
@@ -507,7 +507,7 @@
                 </div>
             </div>
 
-            <div class="settings" v-if="animeList.length > 0">
+            <div v-if="!viewOnly" class="settings" v-show="animeList.length > 0">
                 <label>Top anime to analyze:</label>
                 <input type="number" v-model.number="topCount" min="5" max="50">
                 <button @click="getRecommendations" :disabled="loading">
@@ -601,6 +601,7 @@
                     isDragging: false,
                     listId: null,
                     shareUrl: '',
+                    viewOnly: false, // Hide upload UI when viewing shared link
                     progress: {
                         current: 0,
                         total: 0,
@@ -613,6 +614,7 @@
                 const pathParts = window.location.pathname.split('/').filter(p => p);
                 if (pathParts.length > 0) {
                     const id = pathParts[0];
+                    this.viewOnly = true; // Enable view-only mode for shared links
                     await this.loadListFromAPI(id);
                 }
             },
