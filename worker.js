@@ -1,6 +1,43 @@
 import { nanoid } from 'nanoid';
+import { getAssetFromKV } from '@cloudflare/kv-asset-handler';
 
-// Validation helpers
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const CONFIG = {
+  ALLOWED_ORIGINS: [
+    'https://anime.varyvoda.com',
+    'https://anime-recommendations.cheguevaraua.workers.dev',
+    'http://localhost:8787',
+    'http://localhost:8000'
+  ],
+  LIMITS: {
+    MAX_UPLOAD_SIZE: 10_000_000,      // 10MB
+    MAX_RECOMMEND_SIZE: 5_000_000,    // 5MB
+    MAX_ANIME_ENTRIES: 1000,
+    MAX_RECOMMENDATIONS: 100,
+    MAX_TITLE_LENGTH: 500,
+    MIN_TOP_COUNT: 1,
+    MAX_TOP_COUNT: 50,
+    LIST_ID_LENGTH: 10
+  },
+  JIKAN: {
+    BASE_URL: 'https://api.jikan.moe/v4',
+    RETRY_ATTEMPTS: 3,
+    RATE_LIMIT_DELAY: 1000,           // 1 second
+    DETAIL_DELAY: 350,                // 350ms
+    RETRY_DELAY: 2000                 // 2 seconds
+  },
+  CACHE: {
+    MAX_AGE: 3600                     // 1 hour
+  }
+};
+
+// ============================================================================
+// VALIDATION FUNCTIONS
+// ============================================================================
+
 function validateAnimeList(data) {
   if (!data || typeof data !== 'object') {
     throw new Error('Invalid data format');
@@ -10,8 +47,8 @@ function validateAnimeList(data) {
     throw new Error('Invalid animeList format');
   }
 
-  if (data.animeList.length > 1000) {
-    throw new Error('Too many anime entries (max 1000)');
+  if (data.animeList.length > CONFIG.LIMITS.MAX_ANIME_ENTRIES) {
+    throw new Error(`Too many anime entries (max ${CONFIG.LIMITS.MAX_ANIME_ENTRIES})`);
   }
 
   if (!Array.isArray(data.allAnimeIds)) {
@@ -27,7 +64,7 @@ function validateAnimeList(data) {
       throw new Error('Invalid score range (must be 0-10)');
     }
 
-    if (anime.title.length > 500) {
+    if (anime.title.length > CONFIG.LIMITS.MAX_TITLE_LENGTH) {
       throw new Error('Title too long');
     }
   }
@@ -40,116 +77,204 @@ function validateRecommendations(data) {
     throw new Error('Invalid data format');
   }
 
-  if (typeof data.topCount !== 'number' || data.topCount < 1 || data.topCount > 50) {
-    throw new Error('Invalid topCount (must be 1-50)');
+  const { MIN_TOP_COUNT, MAX_TOP_COUNT, MAX_RECOMMENDATIONS } = CONFIG.LIMITS;
+
+  if (typeof data.topCount !== 'number' || data.topCount < MIN_TOP_COUNT || data.topCount > MAX_TOP_COUNT) {
+    throw new Error(`Invalid topCount (must be ${MIN_TOP_COUNT}-${MAX_TOP_COUNT})`);
   }
 
   if (!Array.isArray(data.recommendations)) {
     throw new Error('Invalid recommendations format');
   }
 
-  if (data.recommendations.length > 100) {
+  if (data.recommendations.length > MAX_RECOMMENDATIONS) {
     throw new Error('Too many recommendations');
   }
 
   return true;
 }
 
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+function validateListId(listId) {
+  const pattern = new RegExp(`^[a-zA-Z0-9_-]{${CONFIG.LIMITS.LIST_ID_LENGTH}}$`);
+  return listId && pattern.test(listId);
+}
 
-    // CORS headers - restrict to own domain in production
-    const origin = request.headers.get('Origin');
-    const allowedOrigins = [
-      'https://anime.varyvoda.com',
-      'https://anime-recommendations.cheguevaraua.workers.dev',
-      'http://localhost:8787',
-      'http://localhost:8000'
-    ];
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
 
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : allowedOrigins[0],
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
+function getCorsHeaders(origin) {
+  const allowedOrigin = CONFIG.ALLOWED_ORIGINS.includes(origin)
+    ? origin
+    : CONFIG.ALLOWED_ORIGINS[0];
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
-    }
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
 
-    // API Routes
-    if (url.pathname === '/api/upload') {
-      return handleUpload(request, env, corsHeaders);
-    }
+function createJsonResponse(data, status = 200, corsHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json',
+    },
+  });
+}
 
-    if (url.pathname.startsWith('/api/recommend/')) {
-      const id = url.pathname.split('/')[3];
-      return handleRecommend(request, env, id, corsHeaders);
-    }
+function createErrorResponse(error, status = 400, corsHeaders = {}) {
+  // Sanitize error messages - only expose validation errors
+  const userMessage = error.message.includes('Invalid') || error.message.includes('Too many')
+    ? error.message
+    : 'An error occurred processing your request';
 
-    if (url.pathname.startsWith('/api/list/')) {
-      const id = url.pathname.split('/')[3];
-      return handleGetList(request, env, id, corsHeaders);
-    }
+  return createJsonResponse({ error: userMessage }, status, corsHeaders);
+}
 
-    // For SPA routing: serve index.html for all non-API routes
-    // Auto-detect the latest index.html hash from KV
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ============================================================================
+// JIKAN API FUNCTIONS
+// ============================================================================
+
+async function fetchJikanAPI(url, retries = CONFIG.JIKAN.RETRY_ATTEMPTS) {
+  for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      // List all keys with 'index.' prefix to find the latest
-      const keys = await env.__STATIC_CONTENT.list({ prefix: 'index.' });
+      const response = await fetch(url);
 
-      if (!keys.keys || keys.keys.length === 0) {
-        return new Response('No HTML files found', { status: 404 });
+      // Handle rate limiting
+      if (response.status === 429) {
+        const waitTime = (attempt + 1) * CONFIG.JIKAN.RETRY_DELAY;
+        await delay(waitTime);
+        continue;
       }
 
-      // Get the first (and likely only) index file
-      const indexKey = keys.keys[0].name;
-      const html = await env.__STATIC_CONTENT.get(indexKey);
-
-      if (!html) {
-        return new Response('HTML not found in KV', { status: 404 });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      return new Response(html, {
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'public, max-age=3600',
-        },
-      });
-    } catch (e) {
-      console.error('Static file error:', e);
-      return new Response('Error loading page', {
-        status: 500,
-        headers: { 'Content-Type': 'text/plain' }
-      });
+      return await response.json();
+    } catch (err) {
+      if (attempt === retries - 1) throw err;
+      await delay(CONFIG.JIKAN.RETRY_DELAY);
     }
   }
-};
+  return null;
+}
+
+async function fetchAnimeRecommendations(animeId) {
+  const url = `${CONFIG.JIKAN.BASE_URL}/anime/${animeId}/recommendations`;
+  return await fetchJikanAPI(url);
+}
+
+async function fetchAnimeDetails(animeId) {
+  const url = `${CONFIG.JIKAN.BASE_URL}/anime/${animeId}`;
+  return await fetchJikanAPI(url);
+}
+
+// ============================================================================
+// RECOMMENDATION ENGINE
+// ============================================================================
+
+async function generateRecommendations(animeList, allAnimeIds, topCount) {
+  // Get top rated anime
+  const topAnime = animeList
+    .filter(a => a.score >= 8)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.min(topCount, CONFIG.LIMITS.MAX_TOP_COUNT));
+
+  // Collect recommendations with frequency counting
+  const recCounter = {};
+  const recDetails = {};
+
+  for (let i = 0; i < topAnime.length; i++) {
+    const anime = topAnime[i];
+
+    try {
+      const recsData = await fetchAnimeRecommendations(anime.id);
+
+      if (recsData && recsData.data) {
+        for (let rec of recsData.data.slice(0, 8)) {
+          const recId = String(rec.entry.mal_id);
+
+          // Only include anime not in user's list
+          if (!allAnimeIds.has(recId)) {
+            const title = rec.entry.title;
+            recCounter[title] = (recCounter[title] || 0) + 1;
+
+            if (!recDetails[title]) {
+              recDetails[title] = {
+                id: recId,
+                url: rec.entry.url,
+              };
+            }
+          }
+        }
+      }
+
+      // Rate limiting between requests
+      await delay(CONFIG.JIKAN.RATE_LIMIT_DELAY);
+    } catch (err) {
+      console.error(`Error fetching recommendations for ${anime.title}:`, err);
+    }
+  }
+
+  // Sort by recommendation count and limit results
+  const sorted = Object.entries(recCounter)
+    .map(([title, count]) => ({
+      title,
+      count,
+      id: recDetails[title].id,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+
+  // Enrich with anime details (images, type, score)
+  for (let rec of sorted) {
+    try {
+      const details = await fetchAnimeDetails(rec.id);
+
+      if (details && details.data) {
+        rec.image = details.data.images?.jpg?.image_url || details.data.images?.jpg?.large_image_url;
+        rec.type = details.data.type;
+        rec.score = details.data.score;
+        rec.mal_id = details.data.mal_id;
+      }
+
+      await delay(CONFIG.JIKAN.DETAIL_DELAY);
+    } catch (err) {
+      console.error(`Error fetching details for ${rec.title}:`, err);
+    }
+  }
+
+  return sorted;
+}
+
+// ============================================================================
+// ROUTE HANDLERS
+// ============================================================================
 
 async function handleUpload(request, env, corsHeaders) {
   try {
-    // Payload size limit (10MB)
+    // Check payload size
     const contentLength = request.headers.get('content-length');
-    if (contentLength && parseInt(contentLength) > 10_000_000) {
-      return new Response(JSON.stringify({ error: 'Payload too large' }), {
-        status: 413,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    if (contentLength && parseInt(contentLength) > CONFIG.LIMITS.MAX_UPLOAD_SIZE) {
+      return createJsonResponse({ error: 'Payload too large' }, 413, corsHeaders);
     }
 
     const data = await request.json();
-
-    // Validate input
     validateAnimeList(data);
 
     const { animeList, allAnimeIds, stats } = data;
-
-    // Generate unique ID
-    const id = nanoid(10);
+    const id = nanoid(CONFIG.LIMITS.LIST_ID_LENGTH);
     const now = Date.now();
 
-    // Save to D1
+    // Save to database
     await env.DB.prepare(
       'INSERT INTO user_lists (id, anime_list, all_anime_ids, stats, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
     )
@@ -163,87 +288,58 @@ async function handleUpload(request, env, corsHeaders) {
       )
       .run();
 
-    return new Response(
-      JSON.stringify({ id, url: `${new URL(request.url).origin}/${id}` }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+    return createJsonResponse(
+      { id, url: `${new URL(request.url).origin}/${id}` },
+      200,
+      corsHeaders
     );
   } catch (err) {
-    // Sanitize error messages - don't leak internal details
     console.error('Upload error:', err);
-    const userMessage = err.message.includes('Invalid') || err.message.includes('Too many')
-      ? err.message
-      : 'Failed to save anime list';
-
-    return new Response(JSON.stringify({ error: userMessage }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return createErrorResponse(err, 400, corsHeaders);
   }
 }
 
-async function handleRecommend(request, env, listId, corsHeaders) {
+async function handleSaveRecommendations(request, env, listId, corsHeaders) {
   try {
-    // Payload size limit
+    // Check payload size
     const contentLength = request.headers.get('content-length');
-    if (contentLength && parseInt(contentLength) > 5_000_000) {
-      return new Response(JSON.stringify({ error: 'Payload too large' }), {
-        status: 413,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    if (contentLength && parseInt(contentLength) > CONFIG.LIMITS.MAX_RECOMMEND_SIZE) {
+      return createJsonResponse({ error: 'Payload too large' }, 413, corsHeaders);
+    }
+
+    // Validate list ID
+    if (!validateListId(listId)) {
+      return createJsonResponse({ error: 'Invalid list ID' }, 400, corsHeaders);
     }
 
     const data = await request.json();
-
-    // Validate input
     validateRecommendations(data);
 
     const { topCount, recommendations } = data;
     const now = Date.now();
 
-    // Validate listId format
-    if (!listId || listId.length !== 10) {
-      return new Response(JSON.stringify({ error: 'Invalid list ID' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Save recommendations to D1
+    // Save to database
     await env.DB.prepare(
       'INSERT INTO recommendations (list_id, recommendations, top_count, created_at) VALUES (?, ?, ?, ?)'
     )
       .bind(listId, JSON.stringify(recommendations), topCount, now)
       .run();
 
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return createJsonResponse({ success: true }, 200, corsHeaders);
   } catch (err) {
-    console.error('Recommend error:', err);
-    const userMessage = err.message.includes('Invalid') || err.message.includes('Too many')
-      ? err.message
-      : 'Failed to save recommendations';
-
-    return new Response(JSON.stringify({ error: userMessage }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error('SaveRecommendations error:', err);
+    return createErrorResponse(err, 400, corsHeaders);
   }
 }
 
 async function handleGetList(request, env, listId, corsHeaders) {
   try {
-    // Validate listId format
-    if (!listId || !/^[a-zA-Z0-9_-]{10}$/.test(listId)) {
-      return new Response(JSON.stringify({ error: 'Invalid list ID format' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // Validate list ID
+    if (!validateListId(listId)) {
+      return createJsonResponse({ error: 'Invalid list ID format' }, 400, corsHeaders);
     }
 
-    // Get user list
+    // Get user list from database
     const listResult = await env.DB.prepare(
       'SELECT anime_list, all_anime_ids, stats FROM user_lists WHERE id = ?'
     )
@@ -251,40 +347,194 @@ async function handleGetList(request, env, listId, corsHeaders) {
       .first();
 
     if (!listResult) {
-      return new Response(JSON.stringify({ error: 'List not found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return createJsonResponse({ error: 'List not found' }, 404, corsHeaders);
     }
 
-    // Get latest recommendations for this list
+    // Get latest recommendations
     const recsResult = await env.DB.prepare(
       'SELECT recommendations, top_count FROM recommendations WHERE list_id = ? ORDER BY created_at DESC LIMIT 1'
     )
       .bind(listId)
       .first();
 
-    return new Response(
-      JSON.stringify({
-        animeList: JSON.parse(listResult.anime_list),
-        allAnimeIds: JSON.parse(listResult.all_anime_ids),
-        stats: JSON.parse(listResult.stats),
-        recommendations: recsResult ? JSON.parse(recsResult.recommendations) : null,
-        topCount: recsResult ? recsResult.top_count : null,
-      }),
+    const responseData = {
+      animeList: JSON.parse(listResult.anime_list),
+      allAnimeIds: JSON.parse(listResult.all_anime_ids),
+      stats: JSON.parse(listResult.stats),
+      recommendations: recsResult ? JSON.parse(recsResult.recommendations) : null,
+      topCount: recsResult ? recsResult.top_count : null,
+    };
+
+    return new Response(JSON.stringify(responseData), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
+      },
+    });
+  } catch (err) {
+    console.error('GetList error:', err);
+    return createJsonResponse({ error: 'Failed to retrieve list' }, 500, corsHeaders);
+  }
+}
+
+async function handleGenerateRecommendations(request, env, listId, corsHeaders) {
+  try {
+    // Validate list ID
+    if (!validateListId(listId)) {
+      return createJsonResponse({ error: 'Invalid list ID format' }, 400, corsHeaders);
+    }
+
+    const data = await request.json();
+    const topCount = data.topCount || 25;
+
+    // Validate topCount
+    if (topCount < CONFIG.LIMITS.MIN_TOP_COUNT || topCount > CONFIG.LIMITS.MAX_TOP_COUNT) {
+      return createJsonResponse(
+        { error: `topCount must be between ${CONFIG.LIMITS.MIN_TOP_COUNT} and ${CONFIG.LIMITS.MAX_TOP_COUNT}` },
+        400,
+        corsHeaders
+      );
+    }
+
+    // Get user list from database
+    const listResult = await env.DB.prepare(
+      'SELECT anime_list, all_anime_ids FROM user_lists WHERE id = ?'
+    )
+      .bind(listId)
+      .first();
+
+    if (!listResult) {
+      return createJsonResponse({ error: 'List not found' }, 404, corsHeaders);
+    }
+
+    const animeList = JSON.parse(listResult.anime_list);
+    const allAnimeIds = new Set(JSON.parse(listResult.all_anime_ids));
+
+    // Generate recommendations
+    const recommendations = await generateRecommendations(animeList, allAnimeIds, topCount);
+
+    // Save to database
+    const now = Date.now();
+    await env.DB.prepare(
+      'INSERT INTO recommendations (list_id, recommendations, top_count, created_at) VALUES (?, ?, ?, ?)'
+    )
+      .bind(listId, JSON.stringify(recommendations), topCount, now)
+      .run();
+
+    return createJsonResponse({
+      success: true,
+      recommendations,
+      count: recommendations.length,
+    }, 200, corsHeaders);
+  } catch (err) {
+    console.error('GenerateRecommendations error:', err);
+    return createJsonResponse({ error: 'Failed to generate recommendations' }, 500, corsHeaders);
+  }
+}
+
+async function handleStaticFile(request, env, ctx) {
+  try {
+    // Use getAssetFromKV to handle static files properly
+    // This works for both local development and production
+    return await getAssetFromKV(
       {
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+        request,
+        waitUntil: ctx.waitUntil.bind(ctx),
+      },
+      {
+        ASSET_NAMESPACE: env.__STATIC_CONTENT,
+        ASSET_MANIFEST: typeof __STATIC_CONTENT_MANIFEST !== 'undefined'
+          ? JSON.parse(__STATIC_CONTENT_MANIFEST)
+          : {},
+        cacheControl: {
+          browserTTL: CONFIG.CACHE.MAX_AGE,
+          edgeTTL: CONFIG.CACHE.MAX_AGE,
         },
       }
     );
-  } catch (err) {
-    console.error('GetList error:', err);
-    return new Response(JSON.stringify({ error: 'Failed to retrieve list' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  } catch (e) {
+    // If asset not found, try to serve index.html for SPA routing
+    try {
+      const notFoundRequest = new Request(`${new URL(request.url).origin}/index.html`, request);
+      return await getAssetFromKV(
+        {
+          request: notFoundRequest,
+          waitUntil: ctx.waitUntil.bind(ctx),
+        },
+        {
+          ASSET_NAMESPACE: env.__STATIC_CONTENT,
+          ASSET_MANIFEST: typeof __STATIC_CONTENT_MANIFEST !== 'undefined'
+            ? JSON.parse(__STATIC_CONTENT_MANIFEST)
+            : {},
+        }
+      );
+    } catch (e) {
+      console.error('Static file error:', e);
+      return new Response('Error loading page', {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' }
+      });
+    }
   }
 }
+
+// ============================================================================
+// ROUTER
+// ============================================================================
+
+function route(url) {
+  const { pathname } = url;
+
+  // API routes
+  if (pathname === '/api/upload') {
+    return { handler: handleUpload };
+  }
+
+  if (pathname.startsWith('/api/recommend/')) {
+    const id = pathname.split('/')[3];
+    return { handler: handleSaveRecommendations, params: { id } };
+  }
+
+  if (pathname.startsWith('/api/list/')) {
+    const id = pathname.split('/')[3];
+    return { handler: handleGetList, params: { id } };
+  }
+
+  if (pathname.startsWith('/api/generate-recommendations/')) {
+    const id = pathname.split('/')[3];
+    return { handler: handleGenerateRecommendations, params: { id } };
+  }
+
+  // Default: serve static file (SPA)
+  return { handler: handleStaticFile, params: {} };
+}
+
+// ============================================================================
+// WORKER EXPORT
+// ============================================================================
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const origin = request.headers.get('Origin');
+    const corsHeaders = getCorsHeaders(origin);
+
+    // Handle preflight requests
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    // Route the request
+    const { handler, params } = route(url);
+
+    // Call handler with appropriate parameters
+    if (handler === handleStaticFile) {
+      return handler(request, env, ctx);
+    } else if (params && params.id) {
+      return handler(request, env, params.id, corsHeaders);
+    } else {
+      return handler(request, env, corsHeaders);
+    }
+  }
+};

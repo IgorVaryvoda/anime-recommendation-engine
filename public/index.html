@@ -5,489 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.jikan.moe https://cloudflareinsights.com; img-src 'self' https: data:;">
     <title>Anime Recommendations</title>
+    <link rel="stylesheet" href="/styles.css">
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-
-        #app {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .container {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            padding: 40px;
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            color: #333;
-            margin-bottom: 10px;
-        }
-
-        .subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 1.1rem;
-        }
-
-        @media (max-width: 768px) {
-            body {
-                padding: 10px;
-            }
-
-            .container {
-                padding: 20px;
-                border-radius: 12px;
-            }
-
-            h1 {
-                font-size: 1.8rem;
-            }
-
-            .subtitle {
-                font-size: 0.95rem;
-            }
-        }
-
-        .upload-area {
-            border: 3px dashed #667eea;
-            border-radius: 12px;
-            padding: 40px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin-bottom: 30px;
-        }
-
-        .upload-area:hover {
-            background: #f8f9ff;
-            border-color: #764ba2;
-        }
-
-        .upload-area.drag-over {
-            background: #f0f4ff;
-            border-color: #764ba2;
-            transform: scale(1.02);
-        }
-
-        .upload-area input {
-            display: none;
-        }
-
-        .upload-label {
-            font-size: 1.2rem;
-            color: #667eea;
-            font-weight: 600;
-        }
-
-        .settings {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .settings label {
-            font-weight: 600;
-            color: #333;
-        }
-
-        .settings input[type="number"] {
-            width: 80px;
-            padding: 8px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 1rem;
-        }
-
-        button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 14px 32px;
-            border-radius: 8px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        button:hover:not(:disabled) {
-            transform: translateY(-2px);
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        @media (max-width: 768px) {
-            .upload-area {
-                padding: 20px;
-            }
-
-            .upload-label {
-                font-size: 1rem;
-            }
-
-            .settings {
-                gap: 10px;
-            }
-
-            .settings label {
-                width: 100%;
-                font-size: 0.9rem;
-            }
-
-            .settings input[type="number"] {
-                width: 70px;
-                padding: 6px;
-                font-size: 0.9rem;
-            }
-
-            button {
-                padding: 12px 20px;
-                font-size: 0.95rem;
-                width: 100%;
-            }
-        }
-
-        .stats {
-            background: #f8f9ff;
-            border-radius: 12px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-
-        .stats h3 {
-            color: #667eea;
-            margin-bottom: 15px;
-        }
-
-        .stat-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-        }
-
-        @media (max-width: 768px) {
-            .stat-grid {
-                grid-template-columns: repeat(2, 1fr);
-                gap: 10px;
-            }
-
-            .stat-item {
-                padding: 12px;
-            }
-
-            .stat-label {
-                font-size: 0.8rem;
-            }
-
-            .stat-value {
-                font-size: 1.3rem;
-            }
-        }
-
-        .stat-item {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
-        }
-
-        .stat-label {
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 5px;
-        }
-
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #333;
-        }
-
-        .top-anime {
-            margin: 20px 0;
-        }
-
-        .top-anime h3 {
-            color: #333;
-            margin-bottom: 15px;
-        }
-
-        .anime-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 15px;
-        }
-
-        @media (max-width: 768px) {
-            .anime-list {
-                grid-template-columns: 1fr;
-                gap: 10px;
-            }
-        }
-
-        .anime-item {
-            background: #f8f9ff;
-            padding: 12px;
-            border-radius: 8px;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            transition: all 0.3s;
-        }
-
-        .anime-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-        }
-
-        .anime-cover {
-            width: 60px;
-            height: 85px;
-            object-fit: cover;
-            border-radius: 4px;
-            flex-shrink: 0;
-        }
-
-        @media (max-width: 768px) {
-            .anime-cover {
-                width: 50px;
-                height: 71px;
-            }
-
-            .anime-item {
-                padding: 10px;
-            }
-
-            .anime-title {
-                font-size: 0.85rem;
-            }
-
-            .anime-score {
-                padding: 3px 10px;
-                font-size: 0.9rem;
-            }
-        }
-
-        .anime-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .anime-title {
-            color: #333;
-            font-weight: 500;
-            font-size: 0.95rem;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-        }
-
-        .anime-score {
-            background: #667eea;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-weight: 600;
-            flex-shrink: 0;
-        }
-
-        .progress {
-            background: #f8f9ff;
-            border-radius: 12px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: #e0e0e0;
-            border-radius: 4px;
-            overflow: hidden;
-            margin: 10px 0;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            transition: width 0.3s;
-        }
-
-        .progress-text {
-            color: #666;
-            font-size: 0.9rem;
-        }
-
-        .recommendations {
-            margin-top: 30px;
-        }
-
-        .recommendations h2 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 2rem;
-        }
-
-        @media (max-width: 768px) {
-            .recommendations h2 {
-                font-size: 1.5rem;
-            }
-
-            .top-anime h3,
-            .stats h3 {
-                font-size: 1.2rem;
-            }
-        }
-
-        .rec-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-        }
-
-        @media (max-width: 768px) {
-            .rec-grid {
-                grid-template-columns: 1fr;
-                gap: 15px;
-            }
-        }
-
-        .rec-item {
-            background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
-            padding: 16px;
-            border-radius: 12px;
-            border-left: 5px solid #667eea;
-            transition: all 0.3s;
-            display: flex;
-            gap: 16px;
-            align-items: center;
-        }
-
-        .rec-item:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.25);
-        }
-
-        .rec-cover {
-            width: 100px;
-            height: 140px;
-            object-fit: cover;
-            border-radius: 8px;
-            flex-shrink: 0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        @media (max-width: 768px) {
-            .rec-cover {
-                width: 80px;
-                height: 112px;
-            }
-
-            .rec-item {
-                padding: 12px;
-            }
-
-            .rec-title {
-                font-size: 1rem;
-            }
-        }
-
-        .rec-content {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .rec-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 8px;
-        }
-
-        .rec-rank {
-            background: #667eea;
-            color: white;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            text-align: center;
-            line-height: 32px;
-            font-weight: bold;
-            flex-shrink: 0;
-        }
-
-        .rec-title {
-            font-size: 1.1rem;
-            color: #333;
-            font-weight: 600;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-        }
-
-        .rec-count {
-            color: #764ba2;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-
-        .rec-type {
-            display: inline-block;
-            background: #764ba2;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            margin-top: 4px;
-        }
-
-        .error {
-            background: #fee;
-            color: #c00;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin-right: 10px;
-        }
-    </style>
 </head>
 <body>
     <div id="app">
@@ -567,18 +86,64 @@
 
             <div v-if="recommendations.length > 0" class="recommendations">
                 <h2>✨ Recommended for You</h2>
+
+                <!-- Filter and Sort Controls -->
+                <div class="filter-controls">
+                    <div class="search-box">
+                        <input
+                            v-model="searchQuery"
+                            type="text"
+                            placeholder="🔍 Search recommendations..."
+                            class="search-input"
+                        >
+                    </div>
+
+                    <div class="filter-group">
+                        <label>Type:</label>
+                        <select v-model="filterType" class="filter-select">
+                            <option value="">All Types</option>
+                            <option value="TV">TV Series</option>
+                            <option value="Movie">Movies</option>
+                            <option value="OVA">OVA</option>
+                            <option value="Special">Special</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label>Sort by:</label>
+                        <select v-model="sortBy" class="filter-select">
+                            <option value="count">Most Recommended</option>
+                            <option value="score">Highest Rated</option>
+                            <option value="title">Title (A-Z)</option>
+                        </select>
+                    </div>
+
+                    <div class="result-count">
+                        Showing {{ filteredRecommendations.length }} of {{ recommendations.length }}
+                    </div>
+                </div>
+
                 <div class="rec-grid">
-                    <div v-for="(rec, idx) in recommendations" :key="rec.title" class="rec-item">
+                    <div v-for="(rec, idx) in filteredRecommendations" :key="rec.title" class="rec-item">
                         <img v-if="rec.image" :src="rec.image" :alt="rec.title" class="rec-cover">
                         <div class="rec-content">
                             <div class="rec-header">
                                 <span class="rec-rank">{{ idx + 1 }}</span>
                                 <div class="rec-title">{{ rec.title }}</div>
                             </div>
-                            <div class="rec-count">Recommended {{ rec.count }} time{{ rec.count > 1 ? 's' : '' }}</div>
+                            <div class="rec-count">
+                                Recommended {{ rec.count }} time{{ rec.count > 1 ? 's' : '' }}
+                                <span v-if="rec.score" style="margin-left: 10px; color: #667eea;">
+                                    ⭐ {{ rec.score }}
+                                </span>
+                            </div>
                             <span v-if="rec.type" class="rec-type">{{ rec.type }}</span>
                         </div>
                     </div>
+                </div>
+
+                <div v-if="filteredRecommendations.length === 0" class="no-results">
+                    No recommendations match your filters. Try adjusting your search or filters.
                 </div>
             </div>
         </div>
@@ -607,8 +172,41 @@
                         current: 0,
                         total: 0,
                         currentAnime: ''
-                    }
+                    },
+                    // Filter and sort options
+                    searchQuery: '',
+                    filterType: '',
+                    sortBy: 'count' // 'count', 'score', 'title'
                 };
+            },
+            computed: {
+                filteredRecommendations() {
+                    let filtered = [...this.recommendations];
+
+                    // Apply search filter
+                    if (this.searchQuery) {
+                        const query = this.searchQuery.toLowerCase();
+                        filtered = filtered.filter(rec =>
+                            rec.title.toLowerCase().includes(query)
+                        );
+                    }
+
+                    // Apply type filter
+                    if (this.filterType) {
+                        filtered = filtered.filter(rec => rec.type === this.filterType);
+                    }
+
+                    // Apply sorting
+                    if (this.sortBy === 'count') {
+                        filtered.sort((a, b) => b.count - a.count);
+                    } else if (this.sortBy === 'score') {
+                        filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
+                    } else if (this.sortBy === 'title') {
+                        filtered.sort((a, b) => a.title.localeCompare(b.title));
+                    }
+
+                    return filtered;
+                }
             },
             async mounted() {
                 // Check if URL has a list ID (e.g., /abc123)
@@ -841,77 +439,50 @@
                     this.error = '';
                     this.recommendations = [];
 
-                    const recCounter = {};
-                    const recDetails = {};
-                    const topToCheck = Math.min(this.topCount, this.topAnime.length);
+                    if (!this.listId) {
+                        this.error = 'List ID not found. Please upload your anime list first.';
+                        this.loading = false;
+                        return;
+                    }
 
+                    const topToCheck = Math.min(this.topCount, this.topAnime.length);
                     this.progress.total = topToCheck;
                     this.progress.current = 0;
+                    this.progress.currentAnime = 'Generating recommendations on server...';
 
-                    // Fetch covers for top anime first
-                    await this.fetchTopAnimeCovers();
+                    try {
+                        // Fetch covers for top anime first
+                        await this.fetchTopAnimeCovers();
 
-                    for (let i = 0; i < topToCheck; i++) {
-                        const anime = this.topAnime[i];
-                        this.progress.current = i + 1;
-                        this.progress.currentAnime = anime.title;
+                        // Call backend to generate recommendations
+                        this.progress.currentAnime = `Analyzing your top ${topToCheck} anime...`;
 
-                        try {
-                            const recs = await this.fetchRecommendations(anime.id);
+                        const response = await fetch(`/api/generate-recommendations/${this.listId}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                topCount: this.topCount
+                            })
+                        });
 
-                            for (let rec of recs.slice(0, 8)) {
-                                const recId = String(rec.entry.mal_id);
-                                if (!this.allAnimeIds.has(recId)) {
-                                    const title = rec.entry.title;
-                                    recCounter[title] = (recCounter[title] || 0) + 1;
-
-                                    // Store first occurrence details
-                                    if (!recDetails[title]) {
-                                        recDetails[title] = {
-                                            id: recId,
-                                            url: rec.entry.url
-                                        };
-                                    }
-                                }
-                            }
-
-                            // Rate limiting: 1 request per second
-                            await this.sleep(1000);
-                        } catch (err) {
-                            console.error(`Error fetching recommendations for ${anime.title}:`, err);
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error || 'Failed to generate recommendations');
                         }
-                    }
 
-                    // Sort by count
-                    const sorted = Object.entries(recCounter)
-                        .map(([title, count]) => ({
-                            title,
-                            count,
-                            id: recDetails[title].id
-                        }))
-                        .sort((a, b) => b.count - a.count)
-                        .slice(0, 20);
+                        const data = await response.json();
+                        this.recommendations = data.recommendations || [];
+                        this.progress.currentAnime = `Found ${this.recommendations.length} recommendations!`;
 
-                    // Fetch details (including images) for recommendations
-                    this.progress.currentAnime = 'Fetching cover images...';
-                    for (let i = 0; i < sorted.length; i++) {
-                        const rec = sorted[i];
-                        try {
-                            const details = await this.fetchAnimeDetails(rec.id);
-                            rec.image = details.images?.jpg?.image_url || details.images?.jpg?.large_image_url;
-                            rec.type = details.type;
-                            await this.sleep(350); // Rate limiting
-                        } catch (err) {
-                            console.error(`Error fetching details for ${rec.title}:`, err);
-                        }
-                    }
-
-                    this.recommendations = sorted;
-                    this.loading = false;
-
-                    // Save recommendations to API
-                    if (this.listId) {
-                        await this.saveRecommendationsToAPI();
+                        // Auto-save is handled by backend, so we're done!
+                        await this.sleep(500); // Brief pause to show success message
+                    } catch (err) {
+                        console.error('Error generating recommendations:', err);
+                        this.error = err.message || 'Failed to generate recommendations. Please try again.';
+                    } finally {
+                        this.loading = false;
+                        this.progress.current = 0;
+                        this.progress.total = 0;
                     }
                 },
 

@@ -12,6 +12,7 @@
     "db:local": "wrangler d1 execute anime-recommendations-db --local --file=./schema.sql"
   },
   "dependencies": {
+    "@cloudflare/kv-asset-handler": "^0.4.0",
     "nanoid": "^5.0.4"
   },
   "devDependencies": {
