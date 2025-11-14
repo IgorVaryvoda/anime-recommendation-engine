@@ -33,7 +33,7 @@ export default {
     // For SPA routing: serve index.html for all non-API routes
     // Directly fetch from KV using the hashed key
     try {
-      const html = await env.__STATIC_CONTENT.get('index.ffb4c5c2b0.html');
+      const html = await env.__STATIC_CONTENT.get('index.5efa696cb6.html');
 
       if (!html) {
         return new Response('HTML not found in KV', { status: 404 });

@@ -668,20 +668,26 @@
 
                     for (let anime of animeElements) {
                         const id = anime.querySelector('series_animedb_id')?.textContent;
-                        const title = anime.querySelector('series_title')?.textContent;
+                        let title = anime.querySelector('series_title')?.textContent;
                         const score = anime.querySelector('my_score')?.textContent;
                         const status = anime.querySelector('my_status')?.textContent;
+
+                        // For Kitsu exports: title might be missing, use ID as placeholder
+                        if (!title && id) {
+                            title = `Anime ${id}`;
+                        }
 
                         if (id) {
                             allIds.add(id);
                         }
 
-                        if (score && parseInt(score) > 0) {
+                        if (score && parseInt(score) > 0 && title) {
                             ratedAnime.push({
                                 id,
                                 title,
                                 score: parseInt(score),
-                                status
+                                status,
+                                needsTitle: !anime.querySelector('series_title')?.textContent
                             });
                         }
                     }
@@ -703,8 +709,37 @@
                         topRated: this.topAnime.length
                     };
 
+                    // Fetch missing titles for Kitsu exports
+                    await this.fetchMissingTitles();
+
                     // Save to API and get shareable URL
                     await this.saveListToAPI();
+                },
+
+                async fetchMissingTitles() {
+                    const needTitles = this.animeList.filter(a => a.needsTitle);
+
+                    if (needTitles.length === 0) return;
+
+                    this.progress.currentAnime = 'Fetching anime titles...';
+                    this.loading = true;
+
+                    for (let anime of needTitles) {
+                        try {
+                            const details = await this.fetchAnimeDetails(anime.id);
+                            if (details.title) {
+                                anime.title = details.title;
+                                delete anime.needsTitle;
+                            }
+                            await this.sleep(350); // Rate limiting
+                        } catch (err) {
+                            console.error(`Error fetching title for ${anime.id}:`, err);
+                        }
+                    }
+
+                    // Update topAnime references
+                    this.topAnime = this.animeList.filter(a => a.score >= 8);
+                    this.loading = false;
                 },
 
                 async saveListToAPI() {
