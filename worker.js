@@ -20,14 +20,16 @@ const CONFIG = {
     MAX_TITLE_LENGTH: 500,
     MIN_TOP_COUNT: 1,
     MAX_TOP_COUNT: 50,
-    LIST_ID_LENGTH: 10
+    LIST_ID_LENGTH: 10,
+    RECOMMENDATION_RESULTS: 50        // Number of recommendations to return
   },
   JIKAN: {
     BASE_URL: 'https://api.jikan.moe/v4',
     RETRY_ATTEMPTS: 3,
     RATE_LIMIT_DELAY: 1000,           // 1 second
     DETAIL_DELAY: 350,                // 350ms
-    RETRY_DELAY: 2000                 // 2 seconds
+    RETRY_DELAY: 2000,                // 2 seconds
+    RECS_PER_ANIME: 10                // Recommendations to fetch per anime
   },
   CACHE: {
     MAX_AGE: 3600                     // 1 hour
@@ -199,7 +201,7 @@ async function generateRecommendations(animeList, allAnimeIds, topCount) {
       const recsData = await fetchAnimeRecommendations(anime.id);
 
       if (recsData && recsData.data) {
-        for (let rec of recsData.data.slice(0, 8)) {
+        for (let rec of recsData.data.slice(0, CONFIG.JIKAN.RECS_PER_ANIME)) {
           const recId = String(rec.entry.mal_id);
 
           // Only include anime not in user's list
@@ -232,7 +234,7 @@ async function generateRecommendations(animeList, allAnimeIds, topCount) {
       id: recDetails[title].id,
     }))
     .sort((a, b) => b.count - a.count)
-    .slice(0, 20);
+    .slice(0, CONFIG.LIMITS.RECOMMENDATION_RESULTS);
 
   // Enrich with anime details (images, type, score)
   for (let rec of sorted) {
