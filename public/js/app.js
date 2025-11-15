@@ -38,6 +38,10 @@ export function initApp() {
     },
 
     computed: {
+      hasRecommendations() {
+        return this.recommendations.length > 0;
+      },
+
       filteredRecommendations() {
         let filtered = [...this.recommendations];
 

@@ -16,7 +16,7 @@
             <h1>🎌 Anime Recommendations</h1>
             <p class="subtitle">{{ viewOnly ? 'Viewing shared anime recommendations' : 'Upload your MyAnimeList export to get personalized recommendations' }}</p>
 
-            <div v-if="!viewOnly && history.length > 0" class="history">
+            <div v-if="!viewOnly && !hasRecommendations && history.length > 0" class="history">
                 <h3>📜 Your Previous Lists</h3>
                 <div class="history-list">
                     <a v-for="item in history" :key="item.id" :href="'/' + item.id" class="history-item">
@@ -54,7 +54,7 @@
 
             <div v-if="error" class="error">{{ error }}</div>
 
-            <div v-if="stats && !viewOnly" class="stats">
+            <div v-if="stats && !hasRecommendations" class="stats">
                 <h3 @click="showStats = !showStats" class="collapsible-header">
                     <span class="collapse-icon">{{ showStats ? '▼' : '▶' }}</span>
                     📊 Your Anime Stats
@@ -79,7 +79,7 @@
                 </div>
             </div>
 
-            <div v-if="topAnime.length > 0 && !viewOnly" class="top-anime">
+            <div v-if="topAnime.length > 0 && !hasRecommendations" class="top-anime">
                 <h3 @click="showTopAnime = !showTopAnime" class="collapsible-header">
                     <span class="collapse-icon">{{ showTopAnime ? '▼' : '▶' }}</span>
                     ⭐ Your Top Anime
