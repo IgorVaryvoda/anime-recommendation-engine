@@ -574,18 +574,14 @@ async function handleStaticFile(request, env, ctx) {
   // Try to serve specific assets first using getAssetFromKV with manifest
   if (url.pathname.includes('.')) {
     try {
+      const assetRequest = new Request(request.url, request);
       const response = await getAssetFromKV(
-        { request, waitUntil: ctx.waitUntil.bind(ctx) },
+        { request: assetRequest, waitUntil: ctx.waitUntil.bind(ctx) },
         {
           ASSET_NAMESPACE: env.__STATIC_CONTENT,
           ASSET_MANIFEST: typeof __STATIC_CONTENT_MANIFEST !== 'undefined'
             ? JSON.parse(__STATIC_CONTENT_MANIFEST)
             : {},
-          mapRequestToAsset: (req) => {
-            const url = new URL(req.url);
-            url.pathname = url.pathname.replace(/^\/+/, '/');
-            return new Request(url.toString(), req);
-          }
         }
       );
 
