@@ -549,6 +549,25 @@ async function handleGenerateRecommendations(request, env, listId, corsHeaders, 
   }
 }
 
+function getContentType(pathname) {
+  const ext = pathname.split('.').pop()?.toLowerCase();
+  const types = {
+    'js': 'application/javascript; charset=utf-8',
+    'mjs': 'application/javascript; charset=utf-8',
+    'css': 'text/css; charset=utf-8',
+    'html': 'text/html; charset=utf-8',
+    'json': 'application/json; charset=utf-8',
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'svg': 'image/svg+xml',
+    'ico': 'image/x-icon',
+    'webp': 'image/webp',
+  };
+  return types[ext] || 'application/octet-stream';
+}
+
 async function handleStaticFile(request, env, ctx) {
   const url = new URL(request.url);
 
@@ -562,35 +581,26 @@ async function handleStaticFile(request, env, ctx) {
           ASSET_MANIFEST: typeof __STATIC_CONTENT_MANIFEST !== 'undefined'
             ? JSON.parse(__STATIC_CONTENT_MANIFEST)
             : {},
+          mapRequestToAsset: (req) => {
+            const url = new URL(req.url);
+            url.pathname = url.pathname.replace(/^\/+/, '/');
+            return new Request(url.toString(), req);
+          }
         }
       );
 
-      // Fix MIME types
-      const ext = url.pathname.split('.').pop();
-      const contentType = response.headers.get('Content-Type');
+      // Always set correct MIME type based on file extension
+      const correctMimeType = getContentType(url.pathname);
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set('Content-Type', correctMimeType);
+      newHeaders.delete('X-Content-Type-Options'); // Remove any conflicting headers
+      newHeaders.set('CF-Workers', 'no-snippets'); // Disable Cloudflare automatic injections
 
-      // Determine correct MIME type
-      let correctMimeType = null;
-      if (ext === 'js') {
-        correctMimeType = 'application/javascript; charset=utf-8';
-      } else if (ext === 'css') {
-        correctMimeType = 'text/css; charset=utf-8';
-      } else if (ext === 'html') {
-        correctMimeType = 'text/html; charset=utf-8';
-      }
-
-      // If we need to fix the MIME type
-      if (correctMimeType && contentType !== correctMimeType) {
-        const newHeaders = new Headers(response.headers);
-        newHeaders.set('Content-Type', correctMimeType);
-        return new Response(response.body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: newHeaders
-        });
-      }
-
-      return response;
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      });
     } catch (e) {
       // If manifest lookup fails, try direct lookup with hashed name
       try {
@@ -603,9 +613,7 @@ async function handleStaticFile(request, env, ctx) {
           if (hashedKey) {
             const content = await env.__STATIC_CONTENT.get(hashedKey.name);
             if (content) {
-              const contentType = ext === 'css' ? 'text/css; charset=utf-8' :
-                                  ext === 'js' ? 'application/javascript; charset=utf-8' :
-                                  'application/octet-stream';
+              const contentType = getContentType(url.pathname);
               return new Response(content, {
                 headers: {
                   'Content-Type': contentType,
@@ -649,6 +657,7 @@ async function handleStaticFile(request, env, ctx) {
             headers: {
               'Content-Type': 'text/html; charset=utf-8',
               'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
+              'CF-Workers': 'no-snippets',
             },
           });
         }
