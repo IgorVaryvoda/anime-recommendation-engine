@@ -12,3 +12,17 @@ database_id = "90cbfa9f-0b11-4f9a-b80a-b89a928fedf1"
 # Workers Sites for static assets
 [site]
 bucket = "./public"
+
+# Increase CPU time limit to 5 minutes (300 seconds)
+[limits]
+cpu_ms = 300000
+
+# Queue for background anime detail fetching
+[[queues.producers]]
+queue = "anime-details-queue"
+binding = "ANIME_DETAILS_QUEUE"
+
+[[queues.consumers]]
+queue = "anime-details-queue"
+max_batch_size = 10
+max_batch_timeout = 30

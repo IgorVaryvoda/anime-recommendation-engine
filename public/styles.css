@@ -38,6 +38,66 @@ h1 {
     font-size: 1.1rem;
 }
 
+/* History */
+.history {
+    background: #f8f9ff;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.history h3 {
+    color: #333;
+    margin-bottom: 15px;
+    font-size: 1.2rem;
+}
+
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: white;
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+    border-left: 4px solid #667eea;
+}
+
+.history-item:hover {
+    transform: translateX(5px);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+}
+
+.history-info {
+    flex: 1;
+}
+
+.history-date {
+    font-weight: 600;
+    color: #667eea;
+    font-size: 0.95rem;
+}
+
+.history-stats {
+    color: #666;
+    font-size: 0.85rem;
+    margin-top: 2px;
+}
+
+.history-arrow {
+    color: #667eea;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
 /* Upload Area */
 .upload-area {
     border: 3px dashed #667eea;

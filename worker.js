@@ -16,9 +16,10 @@ const CONFIG = {
     MAX_UPLOAD_SIZE: 10_000_000,      // 10MB
     MAX_RECOMMEND_SIZE: 5_000_000,    // 5MB
     MAX_ANIME_ENTRIES: 1000,
-    MAX_RECOMMENDATIONS: 500,         // Increased to allow more recommendations
+    MAX_RECOMMENDATIONS: 500,
     MAX_TITLE_LENGTH: 500,
     LIST_ID_LENGTH: 10,
+    MAX_DETAIL_FETCH: 50,             // Limit detail fetching
   },
   JIKAN: {
     BASE_URL: 'https://api.jikan.moe/v4',
@@ -167,20 +168,70 @@ async function fetchAnimeRecommendations(animeId) {
   return await fetchJikanAPI(url);
 }
 
-async function fetchAnimeDetails(animeId) {
+async function fetchAnimeDetails(animeId, env = null) {
+  // Try to get from cache first
+  if (env) {
+    const cached = await env.DB.prepare(
+      'SELECT title, image_url, anime_type, score FROM anime_cache WHERE mal_id = ?'
+    )
+      .bind(animeId)
+      .first();
+
+    if (cached) {
+      return {
+        data: {
+          mal_id: animeId,
+          title: cached.title,
+          images: { jpg: { image_url: cached.image_url, large_image_url: cached.image_url } },
+          type: cached.anime_type,
+          score: cached.score
+        }
+      };
+    }
+  }
+
+  // Fetch from API if not cached
   const url = `${CONFIG.JIKAN.BASE_URL}/anime/${animeId}`;
-  return await fetchJikanAPI(url);
+  const result = await fetchJikanAPI(url);
+
+  // Cache the result
+  if (env && result && result.data) {
+    const now = Date.now();
+    try {
+      await env.DB.prepare(
+        'INSERT OR REPLACE INTO anime_cache (mal_id, title, image_url, anime_type, score, cached_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+        .bind(
+          animeId,
+          result.data.title,
+          result.data.images?.jpg?.image_url || result.data.images?.jpg?.large_image_url,
+          result.data.type,
+          result.data.score,
+          now
+        )
+        .run();
+    } catch (err) {
+      console.error('Error caching anime details:', err);
+    }
+  }
+
+  return result;
 }
 
 // ============================================================================
 // RECOMMENDATION ENGINE
 // ============================================================================
 
-async function generateRecommendations(animeList, allAnimeIds) {
-  // Get all top rated anime (score >= 8)
-  const topAnime = animeList
+async function generateRecommendations(animeList, allAnimeIds, maxTopAnime = null, env = null) {
+  // Get top rated anime (score >= 8)
+  const allTopAnime = animeList
     .filter(a => a.score >= 8)
     .sort((a, b) => b.score - a.score);
+
+  // If maxTopAnime is specified, limit to that number, otherwise use all
+  const topAnime = maxTopAnime ? allTopAnime.slice(0, maxTopAnime) : allTopAnime;
+
+  console.log(`Analyzing ${topAnime.length} top-rated anime (max: ${maxTopAnime})`);
 
   // Collect recommendations with frequency counting
   const recCounter = {};
@@ -213,6 +264,11 @@ async function generateRecommendations(animeList, allAnimeIds) {
 
       // Rate limiting between requests
       await delay(CONFIG.JIKAN.RATE_LIMIT_DELAY);
+
+      // Log progress every 10 anime
+      if ((i + 1) % 10 === 0) {
+        console.log(`Progress: ${i + 1}/${topAnime.length} anime processed`);
+      }
     } catch (err) {
       console.error(`Error fetching recommendations for ${anime.title}:`, err);
     }
@@ -227,25 +283,60 @@ async function generateRecommendations(animeList, allAnimeIds) {
     }))
     .sort((a, b) => b.count - a.count);
 
-  // Enrich with anime details (images, type, score)
-  for (let rec of sorted) {
-    try {
-      const details = await fetchAnimeDetails(rec.id);
+  console.log(`Found ${sorted.length} unique recommendations, fetching details for top ${CONFIG.LIMITS.MAX_DETAIL_FETCH}...`);
 
-      if (details && details.data) {
-        rec.image = details.data.images?.jpg?.image_url || details.data.images?.jpg?.large_image_url;
-        rec.type = details.data.type;
-        rec.score = details.data.score;
-        rec.mal_id = details.data.mal_id;
+  // Enrich with anime details from cache only (super fast)
+  for (let i = 0; i < sorted.length; i++) {
+    const rec = sorted[i];
+    if (env) {
+      const cached = await env.DB.prepare(
+        'SELECT title, image_url, anime_type, score FROM anime_cache WHERE mal_id = ?'
+      )
+        .bind(rec.id)
+        .first();
+
+      if (cached) {
+        rec.image = cached.image_url;
+        rec.type = cached.anime_type;
+        rec.score = cached.score;
+        rec.mal_id = rec.id;
+      } else {
+        // Mark as needing fetch
+        rec.image = null;
+        rec.type = null;
+        rec.score = null;
+        rec.mal_id = rec.id;
       }
-
-      await delay(CONFIG.JIKAN.DETAIL_DELAY);
-    } catch (err) {
-      console.error(`Error fetching details for ${rec.title}:`, err);
+    } else {
+      rec.image = null;
+      rec.type = null;
+      rec.score = null;
+      rec.mal_id = rec.id;
     }
   }
 
+  console.log(`Returning ${sorted.length} recommendations (enriched from cache)`);
   return sorted;
+}
+
+// ============================================================================
+// QUEUE HANDLERS
+// ============================================================================
+
+async function queueAnimeDetailsForFetching(animeIds, env) {
+  if (!env.ANIME_DETAILS_QUEUE) {
+    console.log('No queue available, skipping background fetch');
+    return;
+  }
+
+  const batch = animeIds.map(id => ({ body: { animeId: id } }));
+
+  try {
+    await env.ANIME_DETAILS_QUEUE.sendBatch(batch);
+    console.log(`Queued ${batch.length} anime for background detail fetching`);
+  } catch (err) {
+    console.error('Error queuing anime details:', err);
+  }
 }
 
 // ============================================================================
@@ -371,12 +462,37 @@ async function handleGetList(request, env, listId, corsHeaders) {
   }
 }
 
-async function handleGenerateRecommendations(request, env, listId, corsHeaders) {
+async function handleGenerateRecommendations(request, env, listId, corsHeaders, ctx) {
   try {
     // Validate list ID
     if (!validateListId(listId)) {
       return createJsonResponse({ error: 'Invalid list ID format' }, 400, corsHeaders);
     }
+
+    // Check if recommendations already exist for this list
+    const existingRecs = await env.DB.prepare(
+      'SELECT recommendations, top_count FROM recommendations WHERE list_id = ? ORDER BY created_at DESC LIMIT 1'
+    )
+      .bind(listId)
+      .first();
+
+    if (existingRecs) {
+      const cachedRecommendations = JSON.parse(existingRecs.recommendations);
+      console.log(`Using cached recommendations for ${listId} (${cachedRecommendations.length} items)`);
+
+      return createJsonResponse({
+        success: true,
+        recommendations: cachedRecommendations,
+        count: cachedRecommendations.length,
+        analyzedAnime: existingRecs.top_count,
+        cacheMisses: 0,
+        cached: true,
+      }, 200, corsHeaders);
+    }
+
+    // Parse request body for optional parameters
+    const body = await request.json().catch(() => ({}));
+    const maxTopAnime = body.maxTopAnime || null; // null means analyze all top-rated anime
 
     // Get user list from database
     const listResult = await env.DB.prepare(
@@ -392,25 +508,44 @@ async function handleGenerateRecommendations(request, env, listId, corsHeaders) 
     const animeList = JSON.parse(listResult.anime_list);
     const allAnimeIds = new Set(JSON.parse(listResult.all_anime_ids));
 
-    // Generate recommendations (analyzes all top-rated anime)
-    const recommendations = await generateRecommendations(animeList, allAnimeIds);
+    console.log(`Starting recommendation generation for ${listId}, max: ${maxTopAnime}`);
+
+    // Generate recommendations with configurable limit
+    const recommendations = await generateRecommendations(animeList, allAnimeIds, maxTopAnime, env);
+
+    console.log(`Generated ${recommendations.length} recommendations, saving to database...`);
 
     // Save to database
     const now = Date.now();
+    const actualTopCount = animeList.filter(a => a.score >= 8).length;
     await env.DB.prepare(
       'INSERT INTO recommendations (list_id, recommendations, top_count, created_at) VALUES (?, ?, ?, ?)'
     )
-      .bind(listId, JSON.stringify(recommendations), null, now)
+      .bind(listId, JSON.stringify(recommendations), actualTopCount, now)
       .run();
+
+    console.log(`Recommendations saved successfully`);
+
+    // Queue missing anime details for background fetching
+    const missingAnime = recommendations
+      .filter(rec => !rec.image || !rec.type)
+      .map(rec => rec.id);
+
+    if (missingAnime.length > 0) {
+      console.log(`Queueing ${missingAnime.length} anime for background detail fetching`);
+      await queueAnimeDetailsForFetching(missingAnime, env);
+    }
 
     return createJsonResponse({
       success: true,
       recommendations,
       count: recommendations.length,
+      analyzedAnime: actualTopCount,
+      cacheMisses: missingAnime.length,
     }, 200, corsHeaders);
   } catch (err) {
     console.error('GenerateRecommendations error:', err);
-    return createJsonResponse({ error: 'Failed to generate recommendations' }, 500, corsHeaders);
+    return createJsonResponse({ error: 'Failed to generate recommendations: ' + err.message }, 500, corsHeaders);
   }
 }
 
@@ -460,30 +595,43 @@ async function handleStaticFile(request, env, ctx) {
     }
   }
 
-  // For all other routes (SPA), serve index.html by auto-detecting the hashed filename
+  // For all other routes (SPA), serve index.html
   try {
-    const keys = await env.__STATIC_CONTENT.list({ prefix: 'index.' });
+    // First try using getAssetFromKV for development/production compatibility
+    try {
+      const indexRequest = new Request(new URL('/index.html', request.url));
+      return await getAssetFromKV(
+        { request: indexRequest, waitUntil: ctx.waitUntil.bind(ctx) },
+        {
+          ASSET_NAMESPACE: env.__STATIC_CONTENT,
+          ASSET_MANIFEST: typeof __STATIC_CONTENT_MANIFEST !== 'undefined'
+            ? JSON.parse(__STATIC_CONTENT_MANIFEST)
+            : {},
+        }
+      );
+    } catch (kvError) {
+      // If getAssetFromKV fails, try to find hashed index file (production)
+      const keys = await env.__STATIC_CONTENT.list({ prefix: 'index.' });
 
-    if (!keys.keys || keys.keys.length === 0) {
-      return new Response('No HTML files found', { status: 404 });
+      if (keys.keys && keys.keys.length > 0) {
+        const indexKey = keys.keys[0].name;
+        const html = await env.__STATIC_CONTENT.get(indexKey);
+
+        if (html) {
+          return new Response(html, {
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
+            },
+          });
+        }
+      }
+
+      throw new Error('No HTML files found');
     }
-
-    const indexKey = keys.keys[0].name;
-    const html = await env.__STATIC_CONTENT.get(indexKey);
-
-    if (!html) {
-      return new Response('HTML not found', { status: 404 });
-    }
-
-    return new Response(html, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
-      },
-    });
   } catch (e) {
     console.error('Static file error:', e);
-    return new Response('Error loading page', { status: 500 });
+    return new Response('Error loading page: ' + e.message, { status: 500 });
   }
 }
 
@@ -540,9 +688,50 @@ export default {
     if (handler === handleStaticFile) {
       return handler(request, env, ctx);
     } else if (params && params.id) {
-      return handler(request, env, params.id, corsHeaders);
+      return handler(request, env, params.id, corsHeaders, ctx);
     } else {
       return handler(request, env, corsHeaders);
+    }
+  },
+
+  async queue(batch, env) {
+    console.log(`Processing ${batch.messages.length} anime detail requests from queue`);
+
+    for (const message of batch.messages) {
+      const { animeId } = message.body;
+
+      try {
+        // Check if already cached
+        const cached = await env.DB.prepare(
+          'SELECT 1 FROM anime_cache WHERE mal_id = ?'
+        )
+          .bind(animeId)
+          .first();
+
+        if (cached) {
+          console.log(`Anime ${animeId} already cached, acking`);
+          message.ack();
+          continue;
+        }
+
+        // Fetch from API
+        console.log(`Fetching details for anime ${animeId}`);
+        const details = await fetchAnimeDetails(animeId, env);
+
+        if (details && details.data) {
+          console.log(`Successfully cached anime ${animeId}: ${details.data.title}`);
+          message.ack();
+        } else {
+          console.log(`Failed to fetch details for anime ${animeId}, will retry`);
+          message.retry();
+        }
+
+        // Rate limit
+        await delay(CONFIG.JIKAN.DETAIL_DELAY);
+      } catch (err) {
+        console.error(`Error processing anime ${animeId}:`, err);
+        message.retry();
+      }
     }
   }
 };
