@@ -9,7 +9,8 @@
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create anime-recommendations-db",
     "db:init": "wrangler d1 execute anime-recommendations-db --file=./schema.sql",
-    "db:local": "wrangler d1 execute anime-recommendations-db --local --file=./schema.sql"
+    "db:local": "wrangler d1 execute anime-recommendations-db --local --file=./schema.sql",
+    "queue:create": "wrangler queues create anime-details-queue"
   },
   "dependencies": {
     "@cloudflare/kv-asset-handler": "^0.4.0",
