@@ -52,6 +52,14 @@
                 </button>
             </div>
 
+            <div v-if="loading" class="progress">
+                <strong>Fetching recommendations... {{ progress.current }}/{{ progress.total }}</strong>
+                <div class="progress-bar">
+                    <div class="progress-fill" :style="{ width: (progress.current / progress.total * 100) + '%' }"></div>
+                </div>
+                <p class="progress-text">{{ progress.currentAnime }}</p>
+            </div>
+
             <div v-if="error" class="error">{{ error }}</div>
 
             <div v-if="stats && !hasRecommendations" class="stats">
@@ -87,14 +95,6 @@
                         <span class="anime-score">{{ anime.score }}</span>
                     </div>
                 </div>
-            </div>
-
-            <div v-if="loading" class="progress">
-                <strong>Fetching recommendations... {{ progress.current }}/{{ progress.total }}</strong>
-                <div class="progress-bar">
-                    <div class="progress-fill" :style="{ width: (progress.current / progress.total * 100) + '%' }"></div>
-                </div>
-                <p class="progress-text">{{ progress.currentAnime }}</p>
             </div>
 
             <div v-if="recommendations.length > 0" class="recommendations">
