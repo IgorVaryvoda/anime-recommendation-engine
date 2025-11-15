@@ -795,6 +795,37 @@ export default {
 
         if (details && details.data) {
           console.log(`Successfully cached anime ${animeId}: ${details.data.title}`);
+
+          // Update all recommendations that reference this anime
+          const recsToUpdate = await env.DB.prepare(
+            'SELECT id, recommendations FROM recommendations WHERE recommendations LIKE ?'
+          )
+            .bind(`%"id":"${animeId}"%`)
+            .all();
+
+          for (const rec of recsToUpdate.results) {
+            const recommendations = JSON.parse(rec.recommendations);
+            let updated = false;
+
+            for (const item of recommendations) {
+              if (item.id === animeId && (!item.image || !item.type)) {
+                item.image = details.data.images?.jpg?.image_url || details.data.images?.jpg?.large_image_url;
+                item.type = details.data.type;
+                item.score = details.data.score;
+                updated = true;
+              }
+            }
+
+            if (updated) {
+              await env.DB.prepare(
+                'UPDATE recommendations SET recommendations = ? WHERE id = ?'
+              )
+                .bind(JSON.stringify(recommendations), rec.id)
+                .run();
+              console.log(`Updated recommendation set ${rec.id} with details for anime ${animeId}`);
+            }
+          }
+
           message.ack();
         } else {
           console.log(`Failed to fetch details for anime ${animeId}, will retry`);
