@@ -28,8 +28,6 @@
             </div>
 
             <div v-if="!viewOnly" class="settings" v-show="animeList.length > 0">
-                <label>Top anime to analyze:</label>
-                <input type="number" v-model.number="topCount" min="5" max="50">
                 <button @click="getRecommendations" :disabled="loading">
                     <span v-if="loading" class="spinner"></span>
                     {{ loading ? 'Fetching...' : 'Get Recommendations' }}
@@ -119,16 +117,19 @@
                     </div>
 
                     <div class="result-count">
-                        Showing {{ filteredRecommendations.length }} of {{ recommendations.length }}
+                        Showing {{ paginatedRecommendations.length }} of {{ filteredRecommendations.length }}
+                        <span v-if="filteredRecommendations.length !== recommendations.length">
+                            ({{ recommendations.length }} total)
+                        </span>
                     </div>
                 </div>
 
                 <div class="rec-grid">
-                    <div v-for="(rec, idx) in filteredRecommendations" :key="rec.title" class="rec-item">
+                    <div v-for="(rec, idx) in paginatedRecommendations" :key="rec.title" class="rec-item">
                         <img v-if="rec.image" :src="rec.image" :alt="rec.title" class="rec-cover">
                         <div class="rec-content">
                             <div class="rec-header">
-                                <span class="rec-rank">{{ idx + 1 }}</span>
+                                <span class="rec-rank">{{ (currentPage - 1) * itemsPerPage + idx + 1 }}</span>
                                 <div class="rec-title">{{ rec.title }}</div>
                             </div>
                             <div class="rec-count">
@@ -140,6 +141,34 @@
                             <span v-if="rec.type" class="rec-type">{{ rec.type }}</span>
                         </div>
                     </div>
+                </div>
+
+                <!-- Pagination Controls -->
+                <div v-if="totalPages > 1" class="pagination">
+                    <button @click="currentPage = 1" :disabled="currentPage === 1" class="page-btn">
+                        « First
+                    </button>
+                    <button @click="currentPage--" :disabled="currentPage === 1" class="page-btn">
+                        ‹ Prev
+                    </button>
+
+                    <div class="page-numbers">
+                        <button
+                            v-for="page in visiblePages"
+                            :key="page"
+                            @click="currentPage = page"
+                            :class="['page-btn', { active: currentPage === page }]"
+                        >
+                            {{ page }}
+                        </button>
+                    </div>
+
+                    <button @click="currentPage++" :disabled="currentPage === totalPages" class="page-btn">
+                        Next ›
+                    </button>
+                    <button @click="currentPage = totalPages" :disabled="currentPage === totalPages" class="page-btn">
+                        Last »
+                    </button>
                 </div>
 
                 <div v-if="filteredRecommendations.length === 0" class="no-results">
@@ -161,7 +190,6 @@
                     topAnime: [],
                     recommendations: [],
                     stats: null,
-                    topCount: 25,
                     loading: false,
                     error: '',
                     isDragging: false,
@@ -176,7 +204,10 @@
                     // Filter and sort options
                     searchQuery: '',
                     filterType: '',
-                    sortBy: 'count' // 'count', 'score', 'title'
+                    sortBy: 'count', // 'count', 'score', 'title'
+                    // Pagination
+                    currentPage: 1,
+                    itemsPerPage: 20
                 };
             },
             computed: {
@@ -206,6 +237,42 @@
                     }
 
                     return filtered;
+                },
+                totalPages() {
+                    return Math.ceil(this.filteredRecommendations.length / this.itemsPerPage);
+                },
+                paginatedRecommendations() {
+                    const start = (this.currentPage - 1) * this.itemsPerPage;
+                    const end = start + this.itemsPerPage;
+                    return this.filteredRecommendations.slice(start, end);
+                },
+                visiblePages() {
+                    const pages = [];
+                    const maxVisible = 5;
+                    let startPage = Math.max(1, this.currentPage - Math.floor(maxVisible / 2));
+                    let endPage = Math.min(this.totalPages, startPage + maxVisible - 1);
+
+                    if (endPage - startPage < maxVisible - 1) {
+                        startPage = Math.max(1, endPage - maxVisible + 1);
+                    }
+
+                    for (let i = startPage; i <= endPage; i++) {
+                        pages.push(i);
+                    }
+
+                    return pages;
+                }
+            },
+            watch: {
+                // Reset to first page when filters change
+                searchQuery() {
+                    this.currentPage = 1;
+                },
+                filterType() {
+                    this.currentPage = 1;
+                },
+                sortBy() {
+                    this.currentPage = 1;
                 }
             },
             async mounted() {
@@ -423,7 +490,6 @@
 
                         if (data.recommendations) {
                             this.recommendations = data.recommendations;
-                            this.topCount = data.topCount || 25;
                         }
 
                         this.fileName = 'Loaded from shared link';
@@ -445,8 +511,7 @@
                         return;
                     }
 
-                    const topToCheck = Math.min(this.topCount, this.topAnime.length);
-                    this.progress.total = topToCheck;
+                    this.progress.total = this.topAnime.length;
                     this.progress.current = 0;
                     this.progress.currentAnime = 'Generating recommendations on server...';
 
@@ -454,15 +519,13 @@
                         // Fetch covers for top anime first
                         await this.fetchTopAnimeCovers();
 
-                        // Call backend to generate recommendations
-                        this.progress.currentAnime = `Analyzing your top ${topToCheck} anime...`;
+                        // Call backend to generate recommendations (analyzes all top-rated anime)
+                        this.progress.currentAnime = `Analyzing all ${this.topAnime.length} top-rated anime...`;
 
                         const response = await fetch(`/api/generate-recommendations/${this.listId}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                topCount: this.topCount
-                            })
+                            body: JSON.stringify({})
                         });
 
                         if (!response.ok) {
@@ -492,7 +555,6 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                topCount: this.topCount,
                                 recommendations: this.recommendations
                             })
                         });

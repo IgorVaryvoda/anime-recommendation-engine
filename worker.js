@@ -16,12 +16,9 @@ const CONFIG = {
     MAX_UPLOAD_SIZE: 10_000_000,      // 10MB
     MAX_RECOMMEND_SIZE: 5_000_000,    // 5MB
     MAX_ANIME_ENTRIES: 1000,
-    MAX_RECOMMENDATIONS: 100,
+    MAX_RECOMMENDATIONS: 500,         // Increased to allow more recommendations
     MAX_TITLE_LENGTH: 500,
-    MIN_TOP_COUNT: 1,
-    MAX_TOP_COUNT: 50,
     LIST_ID_LENGTH: 10,
-    RECOMMENDATION_RESULTS: 50        // Number of recommendations to return
   },
   JIKAN: {
     BASE_URL: 'https://api.jikan.moe/v4',
@@ -79,11 +76,7 @@ function validateRecommendations(data) {
     throw new Error('Invalid data format');
   }
 
-  const { MIN_TOP_COUNT, MAX_TOP_COUNT, MAX_RECOMMENDATIONS } = CONFIG.LIMITS;
-
-  if (typeof data.topCount !== 'number' || data.topCount < MIN_TOP_COUNT || data.topCount > MAX_TOP_COUNT) {
-    throw new Error(`Invalid topCount (must be ${MIN_TOP_COUNT}-${MAX_TOP_COUNT})`);
-  }
+  const { MAX_RECOMMENDATIONS } = CONFIG.LIMITS;
 
   if (!Array.isArray(data.recommendations)) {
     throw new Error('Invalid recommendations format');
@@ -183,12 +176,11 @@ async function fetchAnimeDetails(animeId) {
 // RECOMMENDATION ENGINE
 // ============================================================================
 
-async function generateRecommendations(animeList, allAnimeIds, topCount) {
-  // Get top rated anime
+async function generateRecommendations(animeList, allAnimeIds) {
+  // Get all top rated anime (score >= 8)
   const topAnime = animeList
     .filter(a => a.score >= 8)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.min(topCount, CONFIG.LIMITS.MAX_TOP_COUNT));
+    .sort((a, b) => b.score - a.score);
 
   // Collect recommendations with frequency counting
   const recCounter = {};
@@ -226,15 +218,14 @@ async function generateRecommendations(animeList, allAnimeIds, topCount) {
     }
   }
 
-  // Sort by recommendation count and limit results
+  // Sort by recommendation count (return all results)
   const sorted = Object.entries(recCounter)
     .map(([title, count]) => ({
       title,
       count,
       id: recDetails[title].id,
     }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, CONFIG.LIMITS.RECOMMENDATION_RESULTS);
+    .sort((a, b) => b.count - a.count);
 
   // Enrich with anime details (images, type, score)
   for (let rec of sorted) {
@@ -317,14 +308,14 @@ async function handleSaveRecommendations(request, env, listId, corsHeaders) {
     const data = await request.json();
     validateRecommendations(data);
 
-    const { topCount, recommendations } = data;
+    const { recommendations } = data;
     const now = Date.now();
 
     // Save to database
     await env.DB.prepare(
       'INSERT INTO recommendations (list_id, recommendations, top_count, created_at) VALUES (?, ?, ?, ?)'
     )
-      .bind(listId, JSON.stringify(recommendations), topCount, now)
+      .bind(listId, JSON.stringify(recommendations), null, now)
       .run();
 
     return createJsonResponse({ success: true }, 200, corsHeaders);
@@ -387,18 +378,6 @@ async function handleGenerateRecommendations(request, env, listId, corsHeaders) 
       return createJsonResponse({ error: 'Invalid list ID format' }, 400, corsHeaders);
     }
 
-    const data = await request.json();
-    const topCount = data.topCount || 25;
-
-    // Validate topCount
-    if (topCount < CONFIG.LIMITS.MIN_TOP_COUNT || topCount > CONFIG.LIMITS.MAX_TOP_COUNT) {
-      return createJsonResponse(
-        { error: `topCount must be between ${CONFIG.LIMITS.MIN_TOP_COUNT} and ${CONFIG.LIMITS.MAX_TOP_COUNT}` },
-        400,
-        corsHeaders
-      );
-    }
-
     // Get user list from database
     const listResult = await env.DB.prepare(
       'SELECT anime_list, all_anime_ids FROM user_lists WHERE id = ?'
@@ -413,15 +392,15 @@ async function handleGenerateRecommendations(request, env, listId, corsHeaders) 
     const animeList = JSON.parse(listResult.anime_list);
     const allAnimeIds = new Set(JSON.parse(listResult.all_anime_ids));
 
-    // Generate recommendations
-    const recommendations = await generateRecommendations(animeList, allAnimeIds, topCount);
+    // Generate recommendations (analyzes all top-rated anime)
+    const recommendations = await generateRecommendations(animeList, allAnimeIds);
 
     // Save to database
     const now = Date.now();
     await env.DB.prepare(
       'INSERT INTO recommendations (list_id, recommendations, top_count, created_at) VALUES (?, ?, ?, ?)'
     )
-      .bind(listId, JSON.stringify(recommendations), topCount, now)
+      .bind(listId, JSON.stringify(recommendations), null, now)
       .run();
 
     return createJsonResponse({
