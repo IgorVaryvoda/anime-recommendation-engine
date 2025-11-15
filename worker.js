@@ -526,14 +526,44 @@ async function handleGenerateRecommendations(request, env, listId, corsHeaders, 
 
     console.log(`Recommendations saved successfully`);
 
-    // Queue missing anime details for background fetching
-    const missingAnime = recommendations
-      .filter(rec => !rec.image || !rec.type)
-      .map(rec => rec.id);
+    // Fetch details for missing anime
+    const missingAnime = recommendations.filter(rec => !rec.image || !rec.type);
 
     if (missingAnime.length > 0) {
-      console.log(`Queueing ${missingAnime.length} anime for background detail fetching`);
-      await queueAnimeDetailsForFetching(missingAnime, env);
+      console.log(`Found ${missingAnime.length} anime without details`);
+
+      // Fetch first 50 immediately
+      const toFetchNow = missingAnime.slice(0, CONFIG.LIMITS.MAX_DETAIL_FETCH);
+      const toQueue = missingAnime.slice(CONFIG.LIMITS.MAX_DETAIL_FETCH);
+
+      console.log(`Fetching ${toFetchNow.length} anime details immediately`);
+      for (let i = 0; i < toFetchNow.length; i++) {
+        const rec = toFetchNow[i];
+        try {
+          const details = await fetchAnimeDetails(rec.id, env);
+          if (details && details.data) {
+            rec.image = details.data.images?.jpg?.image_url || details.data.images?.jpg?.large_image_url;
+            rec.type = details.data.type;
+            rec.score = details.data.score;
+          }
+          await delay(CONFIG.JIKAN.DETAIL_DELAY);
+        } catch (err) {
+          console.error(`Error fetching details for ${rec.id}:`, err);
+        }
+      }
+
+      // Update saved recommendations with new data
+      await env.DB.prepare(
+        'UPDATE recommendations SET recommendations = ? WHERE list_id = ? AND id = (SELECT MAX(id) FROM recommendations WHERE list_id = ?)'
+      )
+        .bind(JSON.stringify(recommendations), listId, listId)
+        .run();
+
+      // Queue remaining anime for background processing
+      if (toQueue.length > 0) {
+        console.log(`Queueing ${toQueue.length} anime for background fetching`);
+        await queueAnimeDetailsForFetching(toQueue.map(r => r.id), env);
+      }
     }
 
     return createJsonResponse({

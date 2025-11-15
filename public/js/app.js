@@ -31,9 +31,7 @@ export function initApp() {
         currentPage: 1,
         itemsPerPage: CONFIG.ITEMS_PER_PAGE,
         maxTopAnime: null, // null = analyze all top-rated anime
-        history: [],
-        showStats: false,
-        showTopAnime: false
+        history: []
       };
     },
 
