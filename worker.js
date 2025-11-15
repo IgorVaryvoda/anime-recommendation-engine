@@ -598,26 +598,39 @@ async function handleStaticFile(request, env, ctx) {
         headers: newHeaders
       });
     } catch (e) {
-      // If manifest lookup fails, try direct lookup with hashed name
+      // If manifest lookup fails, try direct lookup with the exact path
       try {
-        const baseName = url.pathname.split('/').pop().split('.')[0];
-        const ext = url.pathname.split('.').pop();
-        const keys = await env.__STATIC_CONTENT.list({ prefix: `${baseName}.` });
+        // Try exact path first (e.g., "js/app.js")
+        const assetPath = url.pathname.substring(1); // Remove leading slash
+        let content = await env.__STATIC_CONTENT.get(assetPath);
 
-        if (keys.keys && keys.keys.length > 0) {
-          const hashedKey = keys.keys.find(k => k.name.endsWith(`.${ext}`));
-          if (hashedKey) {
-            const content = await env.__STATIC_CONTENT.get(hashedKey.name);
-            if (content) {
-              const contentType = getContentType(url.pathname);
-              return new Response(content, {
-                headers: {
-                  'Content-Type': contentType,
-                  'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
-                },
-              });
+        // If not found, try with hashed name
+        if (!content) {
+          const pathParts = assetPath.split('/');
+          const filename = pathParts[pathParts.length - 1];
+          const baseName = filename.split('.')[0];
+          const ext = filename.split('.').pop();
+          const dir = pathParts.slice(0, -1).join('/');
+          const prefix = dir ? `${dir}/${baseName}.` : `${baseName}.`;
+
+          const keys = await env.__STATIC_CONTENT.list({ prefix });
+          if (keys.keys && keys.keys.length > 0) {
+            const hashedKey = keys.keys.find(k => k.name.endsWith(`.${ext}`));
+            if (hashedKey) {
+              content = await env.__STATIC_CONTENT.get(hashedKey.name);
             }
           }
+        }
+
+        if (content) {
+          const contentType = getContentType(url.pathname);
+          return new Response(content, {
+            headers: {
+              'Content-Type': contentType,
+              'Cache-Control': `public, max-age=${CONFIG.CACHE.MAX_AGE}`,
+              'CF-Workers': 'no-snippets',
+            },
+          });
         }
       } catch (e2) {
         console.error('Asset lookup error:', e2);
