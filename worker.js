@@ -555,7 +555,7 @@ async function handleStaticFile(request, env, ctx) {
   // Try to serve specific assets first using getAssetFromKV with manifest
   if (url.pathname.includes('.')) {
     try {
-      return await getAssetFromKV(
+      const response = await getAssetFromKV(
         { request, waitUntil: ctx.waitUntil.bind(ctx) },
         {
           ASSET_NAMESPACE: env.__STATIC_CONTENT,
@@ -564,6 +564,16 @@ async function handleStaticFile(request, env, ctx) {
             : {},
         }
       );
+
+      // Fix MIME type for JS files if needed
+      const ext = url.pathname.split('.').pop();
+      if (ext === 'js' && !response.headers.get('Content-Type')?.includes('javascript')) {
+        const newResponse = new Response(response.body, response);
+        newResponse.headers.set('Content-Type', 'application/javascript; charset=utf-8');
+        return newResponse;
+      }
+
+      return response;
     } catch (e) {
       // If manifest lookup fails, try direct lookup with hashed name
       try {
@@ -576,8 +586,8 @@ async function handleStaticFile(request, env, ctx) {
           if (hashedKey) {
             const content = await env.__STATIC_CONTENT.get(hashedKey.name);
             if (content) {
-              const contentType = ext === 'css' ? 'text/css' :
-                                  ext === 'js' ? 'application/javascript' :
+              const contentType = ext === 'css' ? 'text/css; charset=utf-8' :
+                                  ext === 'js' ? 'application/javascript; charset=utf-8' :
                                   'application/octet-stream';
               return new Response(content, {
                 headers: {
