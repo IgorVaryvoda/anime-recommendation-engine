@@ -187,6 +187,25 @@ button:disabled {
     margin-bottom: 15px;
 }
 
+/* Collapsible Headers */
+.collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s;
+}
+
+.collapsible-header:hover {
+    opacity: 0.8;
+}
+
+.collapse-icon {
+    font-size: 0.8rem;
+    transition: transform 0.2s;
+}
+
 .stat-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

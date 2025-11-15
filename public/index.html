@@ -54,9 +54,12 @@
 
             <div v-if="error" class="error">{{ error }}</div>
 
-            <div v-if="stats" class="stats">
-                <h3>📊 Your Anime Stats</h3>
-                <div class="stat-grid">
+            <div v-if="stats && !viewOnly" class="stats">
+                <h3 @click="showStats = !showStats" class="collapsible-header">
+                    <span class="collapse-icon">{{ showStats ? '▼' : '▶' }}</span>
+                    📊 Your Anime Stats
+                </h3>
+                <div v-show="showStats" class="stat-grid">
                     <div class="stat-item">
                         <div class="stat-label">Total Anime</div>
                         <div class="stat-value">{{ stats.total }}</div>
@@ -76,9 +79,12 @@
                 </div>
             </div>
 
-            <div v-if="topAnime.length > 0" class="top-anime">
-                <h3>⭐ Your Top Anime</h3>
-                <div class="anime-list">
+            <div v-if="topAnime.length > 0 && !viewOnly" class="top-anime">
+                <h3 @click="showTopAnime = !showTopAnime" class="collapsible-header">
+                    <span class="collapse-icon">{{ showTopAnime ? '▼' : '▶' }}</span>
+                    ⭐ Your Top Anime
+                </h3>
+                <div v-show="showTopAnime" class="anime-list">
                     <div v-for="anime in topAnime.slice(0, 12)" :key="anime.id" class="anime-item">
                         <img v-if="anime.image" :src="anime.image" :alt="anime.title" class="anime-cover">
                         <div class="anime-info">
