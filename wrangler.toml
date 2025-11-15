@@ -3,6 +3,10 @@ main = "worker.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Disable analytics
+[observability]
+enabled = false
+
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"

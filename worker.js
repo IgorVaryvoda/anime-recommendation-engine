@@ -565,12 +565,29 @@ async function handleStaticFile(request, env, ctx) {
         }
       );
 
-      // Fix MIME type for JS files if needed
+      // Fix MIME types
       const ext = url.pathname.split('.').pop();
-      if (ext === 'js' && !response.headers.get('Content-Type')?.includes('javascript')) {
-        const newResponse = new Response(response.body, response);
-        newResponse.headers.set('Content-Type', 'application/javascript; charset=utf-8');
-        return newResponse;
+      const contentType = response.headers.get('Content-Type');
+
+      // Determine correct MIME type
+      let correctMimeType = null;
+      if (ext === 'js') {
+        correctMimeType = 'application/javascript; charset=utf-8';
+      } else if (ext === 'css') {
+        correctMimeType = 'text/css; charset=utf-8';
+      } else if (ext === 'html') {
+        correctMimeType = 'text/html; charset=utf-8';
+      }
+
+      // If we need to fix the MIME type
+      if (correctMimeType && contentType !== correctMimeType) {
+        const newHeaders = new Headers(response.headers);
+        newHeaders.set('Content-Type', correctMimeType);
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: newHeaders
+        });
       }
 
       return response;
