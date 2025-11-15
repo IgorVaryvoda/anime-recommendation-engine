@@ -153,6 +153,14 @@
                                     ⭐ {{ rec.score }}
                                 </span>
                             </div>
+                            <div class="rec-links">
+                                <a v-if="rec.mal_id" :href="`https://myanimelist.net/anime/${rec.mal_id}`" target="_blank" class="rec-link mal-link">
+                                    MAL
+                                </a>
+                                <a :href="`https://hianime.to/search?keyword=${encodeURIComponent(rec.title)}`" target="_blank" class="rec-link hianime-link">
+                                    HiAnime
+                                </a>
+                            </div>
                             <span v-if="rec.type" class="rec-type">{{ rec.type }}</span>
                         </div>
                     </div>

@@ -486,6 +486,42 @@ button:disabled {
     font-weight: 500;
 }
 
+.rec-links {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.rec-link {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.mal-link {
+    background: #2e51a2;
+    color: white;
+}
+
+.mal-link:hover {
+    background: #1e3a7a;
+    transform: translateY(-1px);
+}
+
+.hianime-link {
+    background: #ff6b6b;
+    color: white;
+}
+
+.hianime-link:hover {
+    background: #ee5a52;
+    transform: translateY(-1px);
+}
+
 .rec-type {
     display: inline-block;
     background: #764ba2;
@@ -493,7 +529,7 @@ button:disabled {
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 0.8rem;
-    margin-top: 4px;
+    margin-top: 8px;
 }
 
 /* Pagination */
